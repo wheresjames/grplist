@@ -40,6 +40,7 @@ FUNCTIONS = {
     'groupList':  gl.groupList,
     'groupList2': gl.groupList2,
     'groupList3': gl.groupList3,
+    'groupList4': gl.groupList4,
 }
 BG       = '#1E1E2E'   # dark blue-grey background
 AX_BG    = '#252535'   # slightly lighter axes background
@@ -50,6 +51,7 @@ COLORS = {
     'groupList':  '#89B4FA',   # sky blue
     'groupList2': '#FAB387',   # peach/orange
     'groupList3': '#A6E3A1',   # green
+    'groupList4': '#CBA6F7',   # lavender
 }
 FN_NAMES = list(FUNCTIONS.keys())
 
@@ -195,42 +197,50 @@ fig.suptitle('grplist — Performance Guide', fontsize=14, fontweight='bold',
              y=1.02, color=TEXT_COL)
 
 # ── Panel 1 ──────────────────────────────────────────────────────────────────
+# groupList2 and groupList4 make identical predicate calls; draw groupList4
+# dashed so both are visible rather than one hiding the other.
+DASH = {'groupList4': (4, 2)}
+
 for name in FN_NAMES:
-    ax1.plot(conn_x, calls_pct[name],
-             marker='o', markersize=3.5, linewidth=2,
-             color=COLORS[name], label=name)
+    dash   = DASH.get(name)
+    kwargs = dict(marker='o', markersize=3.5, linewidth=2,
+                  color=COLORS[name], label=name)
+    if dash:
+        kwargs['linestyle'] = (0, dash)
+    ax1.plot(conn_x, calls_pct[name], **kwargs)
 
 ax1.set_xlabel('Graph connectivity (%)')
 ax1.set_ylabel('Predicate calls\n(% of all n·(n−1)/2 pairs)')
-ax1.set_title('Algorithmic savings\nvs graph connectivity  (n=300)')
-ax1.legend(fontsize=9)
+ax1.set_title('Predicate calls vs connectivity  (n=300)\ngroupList2 & groupList4 overlap')
+ax1.legend(fontsize=8.5)
 ax1.set_xlim(-2, 102)
 ax1.set_ylim(-3, 108)
 ax1.grid(True, alpha=0.4)
 
-# Annotation: groupList flat line
 mid_idx = len(conn_x) // 2
 ax1.annotate(
-    'groupList always\nchecks every pair',
+    'groupList / groupList3\ncheck every pair',
     xy=(conn_x[mid_idx], calls_pct['groupList'][mid_idx]),
-    xytext=(35, 80),
+    xytext=(30, 78),
     fontsize=8, color=COLORS['groupList'],
     arrowprops=dict(arrowstyle='->', color=COLORS['groupList'], lw=1.2),
 )
 
 # ── Panel 2 ──────────────────────────────────────────────────────────────────
-x     = np.arange(len(scenario_times))
-width = 0.26
+n_fns = len(FN_NAMES)
+width = 0.19
+offsets = np.linspace(-(n_fns - 1) / 2, (n_fns - 1) / 2, n_fns) * width
+x = np.arange(len(scenario_times))
 
 for i, name in enumerate(FN_NAMES):
     vals = [row[name] for _, row in scenario_times]
-    ax2.bar(x + (i - 1) * width, vals, width,
+    ax2.bar(x + offsets[i], vals, width,
             label=name, color=COLORS[name], alpha=0.90)
 
 for si, (_, row) in enumerate(scenario_times):
     winner = min(row, key=row.get)
     wi     = FN_NAMES.index(winner)
-    ax2.text(si + (wi - 1) * width, row[winner] + max(row.values()) * 0.02,
+    ax2.text(si + offsets[wi], row[winner] + max(row.values()) * 0.02,
              '★', ha='center', va='bottom', fontsize=10,
              color=COLORS[winner])
 
@@ -238,7 +248,7 @@ ax2.set_xticks(x)
 ax2.set_xticklabels([s[0] for s in scenario_times], fontsize=8.5)
 ax2.set_ylabel('Wall time (ms)')
 ax2.set_title('Wall time by scenario\n★ = fastest')
-ax2.legend(fontsize=9)
+ax2.legend(fontsize=8.5)
 ax2.grid(True, alpha=0.4, axis='y')
 
 # ── Panel 3 ──────────────────────────────────────────────────────────────────

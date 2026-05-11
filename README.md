@@ -27,6 +27,8 @@ groups = gl.groupList([1, 3, 6, 10, 12, 14, 21, 35], lambda a, b: abs(a-b) <= 3,
 
 ---------------------------------------------------------------------
 
+<a id="install"></a>
+
 ## Install
 
 ```
@@ -34,6 +36,8 @@ pip install grplist
 ```
 
 ---------------------------------------------------------------------
+
+<a id="quick-start"></a>
 
 ## Quick start
 
@@ -56,6 +60,8 @@ gl.groupDict(d, lambda a, b: abs(a-b) <= 3)
 
 ---------------------------------------------------------------------
 
+<a id="api-reference"></a>
+
 ## API reference
 
 All functions share the same signature pattern:
@@ -64,9 +70,11 @@ All functions share the same signature pattern:
 groupList(arr, fnc, vals=False)  -> list[list]
 groupList2(arr, fnc, vals=False) -> list[list]
 groupList3(arr, fnc, vals=False) -> list[list]
+groupList4(arr, fnc, vals=False) -> list[list]
 groupDict(obj, fnc, vals=False)  -> list[list]
 groupDict2(obj, fnc, vals=False) -> list[list]
 groupDict3(obj, fnc, vals=False) -> list[list]
+groupDict4(obj, fnc, vals=False) -> list[list]
 ```
 
 ### Parameters
@@ -82,29 +90,31 @@ groupDict3(obj, fnc, vals=False) -> list[list]
 A list of groups. Each group is a list of either values (when `vals=True`) or
 indices/keys (when `vals=False`).
 
-### Choosing between `groupList`, `groupList2`, and `groupList3`
+### Choosing between the variants
 
-All three produce equivalent results for symmetric, transitive predicates.
+All variants produce equivalent results for symmetric, transitive predicates.
 The differences are performance characteristics:
 
-- **`groupList`** — compares every pair of items (O(n²) predicate calls). Simple
-  and straightforward.
-- **`groupList2`** — compares each new item only against existing group members,
-  skipping pairs that cannot bridge groups. Makes fewer predicate calls when
-  groups are sparse or the predicate is expensive.
-- **`groupList3`** — uses [Union-Find](https://en.wikipedia.org/wiki/Disjoint-set_data_structure)
-  with path-halving compression and union-by-rank. Reduces the bookkeeping
-  around each merge from O(n) to O(α(n)) (effectively constant), and skips
-  predicate calls for pairs already in the same component (saving 50–90% of
-  calls on dense graphs). **Best when the predicate is expensive** (I/O,
-  complex computation, ML inference). For cheap Python expressions, the two
-  `find()` loops add more overhead than the predicate calls they save, making
-  `groupList2` the faster choice in practice.
+| Variant | Predicate calls | Merge cost | When to use |
+|---|---|---|---|
+| `groupList` | All n·(n−1)/2 pairs | O(n) per merge | Baseline; simplest code |
+| `groupList2` | ~5–30% of pairs (chain-walk) | O(chain length) per merge | Good general choice |
+| `groupList3` | All pairs (lazy find) | O(α(n)) — Union-Find | Very large n where merge cost dominates |
+| **`groupList4`** | ~5–30% of pairs (same as groupList2) | **O(1) — tail pointer** | **Best general-purpose default** |
 
-`groupDict` and `groupDict2` are thin wrappers that extract the dict's values,
-delegate to `groupList` / `groupList2`, and then remap indices back to keys.
+`groupList4` is the recommended default. It combines `groupList2`'s chain-walk
+comparison (far fewer predicate calls than a full scan) with an O(1) merge step
+using a tail pointer per group — eliminating the only remaining inefficiency in
+`groupList2`. It is never slower than `groupList2` and marginally faster whenever
+groups are merged.
+
+`groupDict`, `groupDict2`, `groupDict3`, and `groupDict4` are thin wrappers that
+extract a dict's values, delegate to the corresponding `groupList` variant, then
+remap indices back to keys.
 
 ---------------------------------------------------------------------
+
+<a id="examples"></a>
 
 ## Examples
 
@@ -131,7 +141,7 @@ def shares_a_letter(a, b):
     return any(c in b for c in a)
 
 words = ['on', 'tw', 'th', 'fo', 'fi', 'si', 'te', 'zk']
-gl.groupList2(words, shares_a_letter, vals=True)
+gl.groupList4(words, shares_a_letter, vals=True)
 # => [['on', 'fo', 'fi', 'si'], ['tw', 'te', 'th'], ['zk']]
 ```
 
@@ -168,13 +178,15 @@ tracks = [
 def overlaps(a, b):
     return a['start'] <= b['end'] and a['end'] >= b['start']
 
-groups = gl.groupList2(tracks, overlaps, vals=True)
+groups = gl.groupList4(tracks, overlaps, vals=True)
 # Group 1: tracks 0, 1, 2  (2-10, 8-17, 4-7 all overlap)
 # Group 2: tracks 3, 4     (20-25, 22-28 overlap)
 # Group 3: track 5         (30-45, no overlap with others)
 ```
 
 ---------------------------------------------------------------------
+
+<a id="how-it-works"></a>
 
 ## How it works
 
@@ -211,42 +223,58 @@ Items:  1 — 3 — 6 — 7 — 10 — 12 — 14     21 — 23     35
 Components:  [1, 3, 6, 7, 10, 12, 14]   [21, 23]   [35]
 ```
 
-### `groupList` — union-find style
+### `groupList` — group-ID scan
 
 `groupList` performs a complete O(n²) pairwise scan. Each item is assigned a
 group ID, and when two items with different IDs are found to match, their groups
-are merged by renumbering. This is conceptually similar to a
-[Union-Find / Disjoint Set Union](https://en.wikipedia.org/wiki/Disjoint-set_data_structure)
-data structure, without path compression.
+are merged by renumbering all affected entries. Conceptually similar to
+[Union-Find](https://en.wikipedia.org/wiki/Disjoint-set_data_structure) but
+without path compression.
 
-### `groupList2` — greedy linked-list merge
+### `groupList2` — chain-walk comparison
 
-`groupList2` maintains a linked list for each group and processes items
-one at a time. Each new item is compared against the members of every existing
-group. If it matches more than one group, those groups are merged. This avoids
-re-comparing items that are already in the same group, reducing predicate calls
-at the cost of more bookkeeping.
+`groupList2` maintains a linked list per group and processes items one at a
+time. Each new item is compared only against existing group members (not all
+pairs), and is inserted adjacent to its match. This reduces predicate calls to
+~5–30% of the full n² scan on typical inputs. The merge step walks the chain
+to find its tail, which is O(chain length).
+
+### `groupList3` — Union-Find merge
+
+`groupList3` uses a full O(n²) comparison scan (like `groupList`) but replaces
+the O(n) merge step with Union-Find path compression and union-by-rank,
+making each merge O(α(n)) — effectively constant. `find()` is called lazily,
+only on True predicate results. Useful when n is very large and the merge cost
+dominates.
+
+### `groupList4` — chain-walk + tail-pointer merge (recommended)
+
+`groupList4` combines the two independent optimisations: `groupList2`'s
+chain-walk comparison (same predicate call count and insertion order) with a
+`t[]` tail-pointer array that makes the merge step O(1) instead of O(chain
+length). It is strictly better than or equal to `groupList2` on every input.
 
 ### Performance guide
 
-![grplist performance guide](bench/charts.png)
+![grplist performance guide](https://raw.githubusercontent.com/wheresjames/grplist/main/bench/charts.png)
 
 The three panels above show:
 
-1. **Algorithmic savings** — `groupList` always calls the predicate for every
-   pair. `groupList2` and `groupList3` both reduce calls as connectivity grows,
-   with `groupList3` making the steepest drop (down to just `n−1` calls when
-   every item connects to every other).
+1. **Predicate call counts** — `groupList` and `groupList3` check every pair
+   (flat lines at 100%). `groupList2` and `groupList4` overlap — both use the
+   same chain-walk comparison and make identical predicate calls, dropping to
+   ~5–30% of all pairs as connectivity grows.
 
-2. **Wall time by scenario** — the star marks the fastest function in each
-   condition. For cheap predicates `groupList2` dominates; for expensive
-   predicates on dense graphs `groupList3` pulls ahead.
+2. **Wall time by scenario** — the star marks the fastest function. `groupList4`
+   (lavender) wins in most conditions, matching `groupList2`'s call count while
+   eliminating the chain-end walk during merges. On very sparse inputs with a
+   cheap predicate, `groupList` edges ahead due to its simpler inner loop.
 
 3. **Winner heatmap** — which function is fastest at every combination of graph
-   connectivity and predicate cost.  `groupList` (blue) wins only on very sparse
-   graphs with a trivially cheap predicate; `groupList2` (orange) is the general
-   winner for cheap predicates; `groupList3` (green) takes over as the predicate
-   becomes more expensive and the graph grows denser.
+   connectivity and predicate cost. `groupList4` (lavender) dominates for medium
+   and dense graphs at all predicate costs. `groupList3` (green) wins the sparse
+   + cheap corner: when almost no pairs match, its simple `if not fnc: continue`
+   hot path has slightly less per-iteration overhead than the other variants.
 
 To regenerate the chart after changing the code:
 
@@ -262,6 +290,8 @@ python bench/generate_charts.py
 - [Single-linkage clustering](https://en.wikipedia.org/wiki/Single-linkage_clustering) — Wikipedia (the ML framing of the same problem)
 
 ---------------------------------------------------------------------
+
+<a id="comparison-to-similar-projects"></a>
 
 ## Comparison to similar projects
 
@@ -356,6 +386,8 @@ external dependencies. For larger inputs, or when you are already working
 within NetworkX, SciPy, or scikit-learn, those tools will serve you better.
 
 ---------------------------------------------------------------------
+
+<a id="references"></a>
 
 ## References
 

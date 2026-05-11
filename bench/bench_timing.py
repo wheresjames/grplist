@@ -56,8 +56,8 @@ def _sparse(n):
 
 ALL = pytest.mark.parametrize(
     "fn",
-    [gl.groupList, gl.groupList2, gl.groupList3],
-    ids=["groupList", "groupList2", "groupList3"],
+    [gl.groupList, gl.groupList2, gl.groupList3, gl.groupList4],
+    ids=["groupList", "groupList2", "groupList3", "groupList4"],
 )
 
 

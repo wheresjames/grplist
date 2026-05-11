@@ -68,12 +68,12 @@ def test_grouplist_evaluates_all_pairs(n):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("n", [50, 200, 500])
-def test_grouplist3_skips_calls_all_same(n, capsys):
+def test_grouplist3_calls_only_true_pairs_all_same(n, capsys):
     """
-    All-same-value input: every pair connects, so after the first row of the
-    outer loop all n items are in one component.  Every subsequent pair is
-    already merged and its predicate call is skipped.  groupList3 makes only
-    n-1 calls; groupList makes n*(n-1)/2.  Savings exceed 90% for any n > 20.
+    With all-same values every predicate call returns True.
+    groupList3 (lazy find) calls the predicate for all n*(n-1)/2 pairs —
+    same as groupList — but find() is only called on True results so the
+    O(n^2) find() overhead of the old eager design is gone.
     """
     t = _all_same(n)
     all_pairs = n * (n - 1) // 2
@@ -83,16 +83,14 @@ def test_grouplist3_skips_calls_all_same(n, capsys):
     gl.groupList(t,  p1)
     gl.groupList3(t, p3)
 
-    assert p1.calls == all_pairs        # groupList: no skipping ever
-    assert p3.calls == n - 1           # groupList3: only the first row needed
-    assert p3.calls < p1.calls * 0.1   # savings exceed 90 %
+    # Both check every pair (all True → no skipping possible)
+    assert p1.calls == all_pairs
+    assert p3.calls == all_pairs
 
-    pct = 100 * (1 - p3.calls / p1.calls)
     with capsys.disabled():
         print(f"\n  all-same n={n:>4}:  "
-              f"groupList={p1.calls:>7,}  "
-              f"groupList3={p3.calls:>7,}  "
-              f"savings={pct:.0f}%")
+              f"groupList={p1.calls:>7,}  groupList3={p3.calls:>7,}  "
+              f"(find() called only on True, not for all pairs)")
 
 
 @pytest.mark.parametrize("n", [50, 200, 500])
@@ -122,8 +120,10 @@ def test_grouplist3_no_skipping_sparse(n, capsys):
 @pytest.mark.parametrize("n", [50, 200, 500])
 def test_grouplist3_partial_savings_random(n, capsys):
     """
-    On typical random input savings sit between the dense and sparse extremes.
-    We assert savings > 0% but do not hard-code an exact percentage.
+    On typical random input groupList3 (lazy) calls the predicate for all
+    pairs — same count as groupList — while groupList2 skips many via its
+    chain-walk structure.  The groupList3 advantage is in cheaper merges,
+    not fewer predicate calls.
     """
     t = _random(n, spread=50)    # high density: spread < 2×n
     all_pairs = n * (n - 1) // 2
@@ -136,8 +136,9 @@ def test_grouplist3_partial_savings_random(n, capsys):
         fn(t, p)
         counts[name] = p.calls
 
-    assert counts["groupList"] == all_pairs
-    assert counts["groupList3"] < counts["groupList"]
+    assert counts["groupList"]  == all_pairs   # all pairs checked
+    assert counts["groupList3"] == all_pairs   # lazy: also checks all pairs
+    assert counts["groupList2"] <= all_pairs   # chain-walk skips some
 
     with capsys.disabled():
         print(f"\n  random n={n:>4} spread=50:")
