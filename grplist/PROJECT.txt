@@ -1,5 +1,5 @@
 name            grplist
-version         0.1.4
+version         0.1.5
 description     Groups list items using a compare function
 company         wheresjames
 author          Robert Umbehant
